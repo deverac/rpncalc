@@ -8,7 +8,9 @@ There is no limit to the stack size.
 
 The calculator state (stack and stored value) is not saved when the app is closed.
 
-The APK is signed with an auto-generated certificate that is valid for 50 years. 
+The APK is signed with an auto-generated certificate that is valid for 50 years.
+
+Try it [online](https://deverac.github.io/rpncalc/).
 
 #### FUNCTIONS
 
