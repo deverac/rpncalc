@@ -1,0 +1,1702 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+  <title>RPNCalc</title>
+  <meta charset="utf-8">
+  <meta name='HandheldFriendly' content='true' />
+  <meta name='viewport' content='width=device-width,height=device-height,user-scalable=no' />
+
+
+<script type="text/javascript">
+
+// Order matters for BASES because number keys are progressively unhidden.
+const BASES = {
+   BIN: 0,
+   OCT: 1,
+   DEC: 2,
+   HEX: 3,
+}
+
+const PREC = {
+   ALL: 0, // Actually rounded.
+   FIX: 1, // Does not do true fixed-point arithmetic.
+   SCI: 2,
+}
+
+const MODES = {
+   DEG: 0,
+   RAD: 1,
+}
+
+const MIN_BITWISE_VAL = -Math.pow(2, 31)
+const BLINK_DELAY_MS = 480
+
+// Small 'e' is used for exponent because big 'E' is used for hex value.
+// Fortunately, we don't have to use Euler's constant, e = 2.17
+// 'e' exponent 2.4e3
+// 'E' hex value 0xE
+const EXPO_CHR = 'e'
+
+// In Javascript, rounding starts at 15 to 17 decimal places.
+const MAX_PRECISION = 16
+
+var STACK
+var SAVED_STACK
+var PENDING
+var IS_LEFT_SHIFTED
+var IS_RIGHT_SHIFTED
+var DISP_PREC
+var STORED_X
+var BASE
+var PRECISION
+var MODE
+var MODE_CONV
+var BLINK_STATE
+var IS_BLINKING
+
+
+document.onkeyup = kbd
+window.onresize = resizeButtonHeight
+
+function _resetCalc() {
+    STACK = []
+    SAVED_STACK = []
+    PENDING = ''
+    IS_LEFT_SHIFTED = false
+    IS_RIGHT_SHIFTED = false
+    DISP_PREC = 4
+    STORED_X = null
+    BASE = BASES.DEC
+    PRECISION = PREC.ALL
+    MODE = MODES.DEG
+    MODE_CONV = (MODE == MODES.DEG ? (Math.PI / 180.0) : 1.0)
+    BLINK_STATE = false
+    IS_BLINKING = false
+    _enableBaseKeys()
+    _updateLcd()
+}
+
+function init() {
+    _resetCalc()
+    _updateLcd()
+    resizeButtonHeight()
+    // ########## TESTS_PLACEHOLDER ##########
+}
+
+
+function resizeButtonHeight() {
+    const lcdEl = document.getElementById('lcd')
+    const textareaHeight = lcdEl.offsetHeight
+    const visibleHeight = window.innerHeight
+    const numRows = 7
+    const rowHeight = (visibleHeight - textareaHeight) / numRows
+    document.querySelectorAll('td.tds').forEach((el, i) => {
+        el.height = parseInt(rowHeight-5)+'px'
+    })
+}
+
+
+
+
+
+function getKeyName(evt) {
+    if (window.event) {
+        return window.event.key
+    } else if (evt) {
+        return evt.which // IE
+    }
+    return null
+}
+
+function _kbd(keyName) {
+    if (keyName == 'Enter') {
+        btnEnter()
+    } else if (keyName == "Backspace" ) {
+        btnDeleteChar()
+    } else if (keyName == "Escape" ) {
+        btnC()
+    } else if (keyName == '0') {
+        btn0()
+    } else if (keyName == '1') {
+        btn1()
+    } else if (keyName == '2') {
+        btn2()
+    } else if (keyName == '3') {
+        btn3()
+    } else if (keyName == '4') {
+        btn4()
+    } else if (keyName == '5') {
+        btn5()
+    } else if (keyName == '6') {
+        btn6()
+    } else if (keyName == '7') {
+        btn7()
+    } else if (keyName == '8') {
+        btn8()
+    } else if (keyName == '9') {
+        btn9()
+    } else if (keyName == 'A') {
+        rightShiftOn()
+        btn0()
+    } else if (keyName == 'B') {
+        rightShiftOn()
+        btn1()
+    } else if (keyName == 'C') {
+        rightShiftOn()
+        btn2()
+    } else if (keyName == 'D') {
+        rightShiftOn()
+        btn3()
+    } else if (keyName == 'E') {
+        rightShiftOn()
+        btn4()
+    } else if (keyName == 'F') {
+        rightShiftOn()
+        btn5()
+    } else if (keyName == '.') {
+        btnDot()
+    } else if (keyName == "-" ) {
+        btnSubtract()
+    } else if (keyName == "+" ) {
+        btnAdd()
+    } else if (keyName == "*" ) {
+        btnMultiply()
+    } else if (keyName == "/" ) {
+        btnDivide()
+    } else if (keyName == "b" ) {
+        btnBase()
+    } else if (keyName == "c" ) {
+        btnCos()
+    } else if (keyName == "d" ) {
+        btnDisp()
+    } else if (keyName == "e" ) {
+        btnExpo()
+    } else if (keyName == "o" ) {
+        btnSto()
+    } else if (keyName == "p" ) {
+        btnChangeSign()
+    } else if (keyName == "q" ) {
+        btnSqrt()
+    } else if (keyName == "r" ) {
+        btnRecip()
+    } else if (keyName == "s" ) {
+        btnSin()
+    } else if (keyName == "t" ) {
+        btnTan()
+    } else if (keyName == "w" ) {
+        btnSwap()
+    } else if (keyName == "y" ) {
+        btnPowyx()
+    } else if (keyName == "[" ) {
+        btnLeftShift()
+    } else if (keyName == "]" ) {
+        btnRightShift()
+    }
+}
+
+function kbd() {
+    _kbd(getKeyName())
+}
+
+
+
+// #############################################################
+// ###### OPERATIONS
+// #############################################################
+
+function add() {
+    if (_has(2)) {
+        const ans = parseFloat(STACK[1]) + parseFloat(STACK[0])
+        _drop(2)
+        STACK.unshift(ans)
+    }
+}
+
+
+function arccos() {
+    if (_has(1)) {
+        STACK[0] = Math.acos(parseFloat(STACK[0]))/MODE_CONV
+    }
+}
+
+function arcsin() {
+    if (_has(1)) {
+        STACK[0] = Math.asin(parseFloat(STACK[0]))/MODE_CONV
+    }
+}
+
+function arctan() {
+    if (_has(1)) {
+        // two-quadrant (I and IV) inverse tangent. Returns +/-90 degrees
+        STACK[0] = Math.atan(parseFloat(STACK[0]))/MODE_CONV
+        // four-quatrant inverse tangent. Returns +/-180 degrees
+        // STACK[1] = Math.atan2(parseFloat(STACK[1], STACK[0]))/MODE_CONV
+        // _drop()
+    }
+}
+
+function _to32bit(val) {
+      let intVal = parseInt(val)
+      const posVal = Math.abs(MIN_BITWISE_VAL)-1
+      if (intVal > posVal) {
+          console.log('too large. clipping.')
+          intVal = posVal
+      }
+      if (intVal < MIN_BITWISE_VAL) {
+          console.log('too small. clipping.')
+          intVal = MIN_BITWISE_VAL
+      }
+      return intVal
+}
+
+function bitwiseAnd() {
+    if (_has(2)) {
+        if (_isInt(STACK[0]) && _isInt(STACK[1])) {
+            // Bitwise operations are 32-bit. Larger values are truncated.
+            const a = _to32bit(STACK[0])
+            const b = _to32bit(STACK[1])
+            STACK[1] = a & b
+            _drop()
+        }
+    }
+}
+
+function bitwiseNot() {
+    if (_has(1)) {
+        if (_isInt(STACK[0])) {
+            // Bitwise operations are 32-bit. Larger values are truncated.
+            const val = _to32bit(STACK[0])
+            STACK[0] = ~val
+        }
+    }
+
+}
+
+function bitwiseOr() {
+    if (_has(2)) {
+        if (_isInt(STACK[0]) && _isInt(STACK[1])) {
+            // Bitwise operations are 32-bit. Larger values are truncated.
+            const a = _to32bit(STACK[0])
+            const b = _to32bit(STACK[1])
+            STACK[1] = a | b
+            _drop()
+        }
+    }
+}
+
+function bitwiseXor() {
+    if (_has(2)) {
+        if (_isInt(STACK[0]) && _isInt(STACK[1])) {
+            // Bitwise operations are 32-bit. Larger values are truncated.
+            const a = _to32bit(STACK[0])
+            const b = _to32bit(STACK[1])
+            STACK[1] = a ^ b
+            _drop()
+        }
+    }
+}
+
+function inputPi() {
+    if (_isPending()) {
+        enterKey()
+    }
+    STACK.unshift(Math.PI)
+}
+
+function inputTau() {
+    if (_isPending()) {
+        enterKey()
+    }
+    STACK.unshift(2*Math.PI)
+}
+
+function combination() {
+    if (_has(2)) {
+        if (_isInt(STACK[0]) && _isInt(STACK[1])) {
+            const m = parseInt(STACK[0])
+            const n = parseInt(STACK[1])
+            STACK[1] = _fact(n) / (_fact(m) * _fact(n-m))
+            _drop()
+        }
+    }
+}
+
+function cos() {
+    if (_has(1)) {
+        STACK[0] = Math.cos(parseFloat(STACK[0]) * MODE_CONV)
+    }
+}
+
+function drop() {
+    if (_has(1)) {
+        _drop()
+    }
+}
+
+function divide() {
+    if (_has(2)) {
+        const ans = parseFloat(STACK[1]) / parseFloat(STACK[0])
+        _drop(2)
+        STACK.unshift(ans)
+    }
+}
+
+function factorial() {
+    if (_has(1)) {
+        // STACK[0] = _gammaFact(parseInt(STACK[0]))
+        STACK[0] = _gammaFact(parseFloat(STACK[0]))
+    }
+}
+
+function lnx() {
+    if (_has(1)) {
+         STACK[0] = Math.log(parseFloat(STACK[0]))
+    }
+}
+
+function logx() {
+    if (_has(1)) {
+         STACK[0] = Math.log10(parseFloat(STACK[0]))
+    }
+}
+
+function multiply() {
+    if (_has(2)) {
+        STACK[1] = parseFloat(STACK[1]) * parseFloat(STACK[0])
+        _drop()
+    }
+}
+
+function mod() {
+    if (_has(2)) {
+        if (_isInt(STACK[0]) && _isInt(STACK[1])) {
+            const i0 = parseInt(STACK[0])
+            const i1 = parseInt(STACK[1])
+            STACK[1] = i1 % i0
+            _drop()
+        }
+    }
+}
+
+function negate() {
+    if (_isPending() || _has(1)) {
+        let str = (_isPending() ? PENDING : ''+STACK[0])
+        let doNegate = true
+        if (_isPending()) {
+            str = PENDING
+            let negEPos = str.indexOf(EXPO_CHR+'-')
+            let posEPos = str.indexOf(EXPO_CHR)
+            if (negEPos >= 0) {
+                str = str.substring(0, negEPos+1) + str.substring(negEPos+2)
+                doNegate = false
+            } else if (posEPos >= 0) {
+                str = str.substring(0, posEPos+1) + '-' + str.substring(posEPos+1)
+                doNegate = false
+            }
+        }
+        if (doNegate) {
+            if (str.startsWith('-')) {
+                str = str.substring(1)
+            } else {
+                str = '-' + str
+            }
+        }
+        if (_isPending()) {
+            PENDING = str
+        } else {
+            STACK[0] = str
+        }
+    }
+}
+
+function powex() {
+    if (_has(1)) {
+         STACK[0] = Math.exp(parseFloat(STACK[0]))
+    }
+}
+
+function pow10x() {
+    if (_has(1)) {
+         STACK[0] = Math.pow(10, parseFloat(STACK[0]))
+    }
+}
+
+function powyx() {
+    if (_has(2)) {
+      STACK[1] = Math.pow(parseFloat(STACK[1]),parseFloat(STACK[0]))
+      _drop()
+    }
+}
+
+function _rootxy(x, y) {
+    var tmp = Math.log(y) / x
+    return Math.pow(Math.E, tmp)
+}
+
+function rootxy() {
+    if (_has(2)) {
+      const x = parseFloat(STACK[0])
+      const y = parseFloat(STACK[1])
+      STACK[1] = _rootxy(x, y)
+      _drop()
+    }
+}
+
+function rand() {
+    if (_isPending()) {
+        if (_isInt(PENDING)) {
+            enterKey()
+            STACK[0] = parseInt(Math.random() * parseInt(STACK[0]))
+        }
+    } else {
+        STACK.unshift(Math.random())
+    }
+}
+
+function sin() {
+    if (_has(1)) {
+        STACK[0] = Math.sin(parseFloat(STACK[0]) * MODE_CONV)
+    }
+}
+
+function sqrt() {
+    if (_has(1)) {
+        STACK[0] = Math.sqrt(parseFloat(STACK[0]))
+    }
+}
+
+function swapxy() {
+    if (_has(2)) {
+        const tmp = STACK[0]
+        STACK[0] = STACK[1]
+        STACK[1] = tmp
+    }
+}
+
+function tan() {
+    if (_has(1)) {
+        STACK[0] = Math.tan(parseFloat(STACK[0]) * MODE_CONV)
+    }
+}
+
+function undoPrevOp() {
+    STACK=[]
+    for(var i=0; i<SAVED_STACK.length; i++) {
+        STACK.push(SAVED_STACK[i])
+    }
+    _updateLcd()
+}
+
+function _parsePendingAsBase(base) {
+    const pos = PENDING.indexOf(EXPO_CHR)
+    if (pos >= 0) {
+        const mantissa = parseInt(PENDING.substring(0, pos), base)
+        const exponent = parseInt(PENDING.substring(pos+1), base)
+        const base10Val = Number(mantissa + EXPO_CHR + exponent)
+        return base10Val
+    } else {
+        return parseInt(PENDING, base)
+    }
+}
+
+function enterKey() {
+    if (_isPending()) {
+        let val = ''
+        if (isBaseBin()) {
+            val = _parsePendingAsBase(2)
+        } else if (isBaseOct()) {
+            val = _parsePendingAsBase(8)
+        } else if (isBaseDec()) {
+            val = PENDING
+        } else if (isBaseHex()) {
+            val = _parsePendingAsBase(16)
+        }
+        STACK.unshift(val)
+        _clearPending()
+        if (isLeftShifted()) {
+            // None
+        } else if (isRightShifted()) {
+            // None
+        } else {
+        }
+    } else {
+        STACK.unshift(STACK[0])
+    }
+    _updateLcd()
+}
+
+
+function recallx() {
+    if (STORED_X) {
+        if (_isPending()) {
+            enterKey()
+        }
+        STACK.unshift(STORED_X)
+    }
+}
+
+function reciprocal() {
+    if (_has(1)) {
+        STACK[0] = 1 / parseFloat(STACK[0])
+    }
+}
+
+function storex() {
+    if (_isPending()) {
+        enterKey()
+    }
+    if (_has(1)) {
+        STORED_X = STACK[0]
+        _drop()
+    }
+}
+
+function subtract() {
+    if (_has(2)) {
+        const ans = parseFloat(STACK[1]) - parseFloat(STACK[0])
+        _drop(2)
+        STACK.unshift(ans)
+    }
+}
+
+function _isBlinking() {
+    return IS_BLINKING
+}
+
+function fin() {
+    rightShiftOff()
+    leftShiftOff()
+    _updateLcd()
+}
+
+function inputStr(str) {
+    let isOk = true
+    if (isBaseBin() && str.match(/[^01e]/g)) {
+        isOk = false
+    } else if (isBaseOct() && str.match(/[^012345678e]/g)) {
+        isOk = false
+    } else if (isBaseDec()) {
+        let chkStr = str
+        if (_isPending()) {
+            if (str.startsWith('.')) {
+                chkStr = '0'+str
+            }
+        } else {
+            if (str == EXPO_CHR) {
+                str = '1'+str
+                chkStr = str
+            } else if (str == '.') {
+                chkStr = '0'+str
+            }
+        }
+        if (!_isValidNumber(PENDING+chkStr)) {
+            isOk = false
+        }
+    } else if (isBaseHex() && str.match(/[^0123456789ABCDEFe]/g)) {
+        isOk = false
+    }
+
+
+    if (isOk) {
+        if (!_isBlinking()) {
+            _startBlinking()
+        }
+        if (isBaseHex() && str != EXPO_CHR) {
+            // Must be uppercase to distinguish 0xE from EEX exponent ('e')
+            str = str.toUpperCase()
+        }
+        PENDING += str
+    } else {
+        console.log('invalid entry ignored', str)
+    }
+}
+
+
+function _isValidNumber(str) {
+    if (typeof str === 'string') {
+        if (str.slice(-1) == EXPO_CHR) { // Allow exponents
+            str += '1'
+        }
+        return !isNaN(+str)
+    }
+    return false
+}
+
+// #############################################################
+// ###### BUTTONS
+// #############################################################
+// All 'btn...()' functions return false to prevent default 'click' action.
+
+function btn0() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        if (isBaseHex()) {
+            inputStr('A')
+        }
+    } else {
+        inputStr('0')
+    }
+    fin()
+    return false
+}
+
+function btn1() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        if (isBaseHex()) {
+            inputStr('B')
+        }
+    } else {
+        inputStr('1')
+    }
+    fin()
+    return false
+}
+
+function btn2() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        if (isBaseHex()) {
+            inputStr('C')
+        }
+    } else {
+        if (isBaseOct() || isBaseDec() || isBaseHex()) {
+            inputStr('2')
+        }
+    }
+    fin()
+    return false
+}
+
+function btn3() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        if (isBaseHex()) {
+            inputStr('D')
+        }
+    } else {
+        if (isBaseOct() || isBaseDec() || isBaseHex()) {
+            inputStr('3')
+        }
+    }
+    fin()
+    return false
+}
+
+function btn4() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        if (isBaseHex()) {
+            inputStr('E')
+        }
+    } else {
+        if (isBaseOct() || isBaseDec() || isBaseHex()) {
+            inputStr('4')
+        }
+    }
+    fin()
+    return false
+}
+
+function btn5() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        if (isBaseHex()) {
+            inputStr('F')
+        }
+    } else {
+        if (isBaseOct() || isBaseDec() || isBaseHex()) {
+            inputStr('5')
+        }
+    }
+    fin()
+    return false
+}
+
+function btn6() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        if (isBaseOct() || isBaseDec() || isBaseHex()) {
+            inputStr('6')
+        }
+    }
+    fin()
+    return false
+}
+
+function btn7() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        if (isBaseOct() || isBaseDec() || isBaseHex()) {
+            inputStr('7')
+        }
+    }
+    fin()
+    return false
+}
+
+function btn8() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        if (isBaseDec() || isBaseHex()) {
+            inputStr('8')
+        }
+    }
+    fin()
+    return false
+}
+
+function btn9() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        if (isBaseDec() || isBaseHex()) {
+            inputStr('9')
+        }
+    }
+    fin()
+    return false
+}
+
+function btnAdd() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        fn(add)
+    }
+    return false
+}
+
+function btnBase() {
+    if (isLeftShifted()) {
+        nextMode()
+    } else if (isRightShifted()) {
+        fn(bitwiseOr)
+    } else {
+        if (_isPending()) {
+            enterKey()
+        }
+        nextBase()
+    }
+    fin()
+    return false
+}
+
+
+function btnChangeSign() {
+    if (isLeftShifted()) {
+        rand()
+    } else if (isRightShifted()) {
+        fn(mod)
+    } else {
+        negate()
+    }
+    fin()
+    return false
+}
+
+function btnC() {
+    // Clear, regardless of left or right shift buttons.
+    if (_isPending()) {
+        _clearPending()
+    }
+    fin()
+    return false
+}
+
+function btnCos() {
+    if (isLeftShifted()) {
+        fn(arccos)
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        fn(cos)
+    }
+    fin()
+    return false
+}
+
+function btnDeleteChar() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        _saveStack()
+        _clearPending()
+        _clearStack()
+        _clearStored()
+    } else {
+        if (_isPending()) {
+            PENDING = PENDING.substring(0, PENDING.length-1)
+        } else {
+            fn(drop)
+        }
+    }
+    fin()
+    return false
+}
+
+function btnDot() {
+    if (isBaseDec()) {
+        if (isLeftShifted()) {
+            inputTau()
+        } else if (isRightShifted()) {
+            inputPi()
+        } else {
+            inputStr('.')
+        }
+    }
+    fin()
+    return false
+}
+
+function btnDisp() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        fn(bitwiseNot)
+    } else {
+        if (_isPending() && isPrecisionFix() && isBaseDec() && _isInt(PENDING)) {
+            const p = parseInt(PENDING)
+            if (p >= 0) {
+                DISP_PREC = Math.min(p, MAX_PRECISION)
+                _clearPending()
+            } else {
+                nextPrecision()
+            }
+        } else {
+            nextPrecision()
+        }
+        _updateLcd()
+    }
+    fin()
+    return false
+}
+
+function btnDivide() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        fn(divide)
+    }
+    fin()
+    return false
+}
+
+function btnEnter() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        _stopBlinking()
+        enterKey()
+    }
+    fin()
+    return false
+}
+
+function btnExpo() {
+    if (isLeftShifted()) {
+        fn(combination)
+    } else if (isRightShifted()) {
+        fn(factorial)
+    } else {
+        // inputStr('E')
+        inputStr(EXPO_CHR)
+    }
+    fin()
+    return false
+}
+
+function btnFactorial() {
+    fn(factorial)
+    fin()
+    return false
+}
+
+function btnLeftShift() {
+    if (isLeftShifted()) {
+        leftShiftOff()
+    } else {
+        leftShiftOn()
+    }
+    rightShiftOff()
+    _updateLcd()
+    return false
+}
+
+function btnMultiply() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        fn(multiply)
+    }
+    fin()
+    return false
+}
+
+function btnPowyx() {
+    if (isLeftShifted()) {
+        fn(pow10x)
+    } else if (isRightShifted()) {
+        fn(logx)
+    } else {
+        fn(powyx)
+    }
+    fin()
+    return false
+}
+
+function btnRecip() {
+    if (isLeftShifted()) {
+        fn(powex)
+    } else if (isRightShifted()) {
+        fn(lnx)
+    } else {
+        fn(reciprocal)
+    }
+    fin()
+    return false
+}
+
+function btnRightShift() {
+    if (isRightShifted()) {
+        rightShiftOff()
+    } else {
+        rightShiftOn()
+    }
+    leftShiftOff()
+    _updateLcd()
+    return false
+}
+
+
+function btnSto() {
+    if (isLeftShifted()) {
+        recallx()
+        _saveStack()
+    } else if (isRightShifted()) {
+        fn(bitwiseAnd)
+    } else {
+        storex()
+    }
+    fin()
+    return false
+}
+
+function btnSin() {
+    if (isLeftShifted()) {
+        fn(arcsin)
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        fn(sin)
+    }
+    fin()
+    return false
+}
+
+function btnSqrt() {
+    if (isLeftShifted()) {
+        fn(rootxy)
+    } else if (isRightShifted()) {
+        fn(bitwiseXor)
+    } else {
+        fn(sqrt)
+    }
+    fin()
+    return false
+}
+
+
+function btnSubtract() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        fn(subtract)
+    }
+    fin()
+    return false
+}
+
+
+function btnSwap() {
+    if (isLeftShifted()) {
+        // None
+    } else if (isRightShifted()) {
+        undoPrevOp()
+    } else {
+        fn(swapxy)
+    }
+    fin()
+    return false
+}
+
+function btnTan() {
+    if (isLeftShifted()) {
+        fn(arctan)
+    } else if (isRightShifted()) {
+        // None
+    } else {
+        fn(tan)
+    }
+    fin()
+    return false
+}
+
+
+
+
+
+// #############################################################
+// ###### OTHER
+// #############################################################
+
+// Euler's gamma function for computing factorial of non-integers. 
+// e.g. 0.5! = sqrt(pi) / 2
+// https://stackoverflow.com/questions/15454183/how-to-make-a-function-that-computes-the-factorial-for-numbers-with-decimals
+// Claims to be accurate to 15 decimal places.
+function _gamma(val) {
+    var g = 7
+    var C = [
+        0.99999999999980993,
+        676.5203681218851,
+        -1259.1392167224028,
+        771.32342877765313,
+        -176.61502916214059,
+        12.507343278686905,
+        -0.13857109526572012,
+        9.9843695780195716e-6,
+        1.5056327351493116e-7
+    ]
+
+    function gamma(z) {
+
+        if (z < 0.5) {
+            return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
+        } else {
+            z -= 1;
+
+            var x = C[0];
+            for (var i = 1; i < g + 2; i++) {
+                x += C[i] / (z + i)
+            }
+            var t = z + g + 0.5;
+            return Math.sqrt(2 * Math.PI) * Math.pow(t, (z + 0.5)) * Math.exp(-t) * x;
+        }
+    }
+    return gamma(val)
+}
+
+
+function _gammaFact(val) {
+    if (Math.abs(val - 0) < Number.EPSILON ) { // zero
+        return 1
+    } else if (_isInt(val) && val > 0) { // positive integer
+        return _fact(val)
+    } else if (_isInt(val) && val < 0) { // negative integer
+        // Gamma is not defined for negative integers because they are
+        // discontinuous and result in +/- Infinity.
+        console.log('gamma not defined for negative integers')
+        return Infinity
+    } else { // negative or positive non-integer
+        return _gamma(val+1)
+    }
+}
+
+function _fact(n) {
+    var val=1
+    for (var i = 2; i<=n; i++) {
+        val *= i
+    }
+    return val
+}
+
+
+
+function _saveStack() {
+    SAVED_STACK=[]
+    for(var i=0; i<STACK.length; i++) {
+        SAVED_STACK.push(STACK[i])
+    }
+}
+
+function _drop(n) {
+    const limit = (n ? n : 1)
+    for (var i=0; i<limit; i++) {
+        STACK.shift()
+    }
+}
+
+
+
+function nextMode() {
+    MODE = (MODE + 1) % Object.keys(MODES).length
+    if (isModeDegrees()) {
+        MODE_CONV = Math.PI / 180.0
+    } else {
+        MODE_CONV = 1.0
+    }
+}
+
+function _enableBaseKeys() {
+    // Start with (almost) all keys hidden, then progressively unhide keys.
+    // This prevents 'blinking' the keys on slower machines when changing bases.
+    if (BASE == BASES.BIN) {
+        document.querySelectorAll('.oct').forEach(el => el.style.display = 'none')
+        document.querySelectorAll('.dec').forEach(el => el.style.display = 'none')
+        document.querySelectorAll('.hex').forEach(el => el.style.display = 'none')
+    }
+
+    if (BASE == BASES.OCT) {
+        document.querySelectorAll('.oct').forEach(el => el.style.display = 'block')
+    }
+
+    if (BASE == BASES.DEC) {
+        document.querySelectorAll('.dec').forEach(el => el.style.display = 'block')
+    }
+
+    if (BASE == BASES.HEX) {
+        document.querySelectorAll('.dot').forEach(el => el.style.display = 'none')
+        document.querySelectorAll('.hex').forEach(el => el.style.display = 'block')
+    }
+}
+
+function nextBase() {
+    BASE = (BASE + 1) % Object.keys(BASES).length
+    _enableBaseKeys()
+}
+
+function nextPrecision() {
+    PRECISION = (PRECISION + 1) % Object.keys(PREC).length
+}
+
+function fn(func) {
+    _applyPending()
+    _saveStack()
+    func()
+    leftShiftOff()
+    rightShiftOff()
+    _updateLcd()
+    _stopBlinking()
+}
+
+
+function _has(n) {
+    return STACK.length >= n
+}
+
+function _applyPending() {
+    if (PENDING) {
+        enterKey()
+    }
+}
+
+function leftShiftOff() {
+    IS_LEFT_SHIFTED = false
+}
+
+function rightShiftOff() {
+    IS_RIGHT_SHIFTED = false
+}
+
+function leftShiftOn() {
+    IS_LEFT_SHIFTED = true
+}
+
+function rightShiftOn() {
+    IS_RIGHT_SHIFTED = true
+}
+
+
+function isLeftShifted() {
+    return IS_LEFT_SHIFTED
+}
+
+function isRightShifted() {
+    return IS_RIGHT_SHIFTED
+}
+
+function isBaseBin() {
+    return BASE == BASES.BIN
+}
+
+function isBaseDec() {
+    return BASE == BASES.DEC
+}
+
+function isBaseHex() {
+    return BASE == BASES.HEX
+}
+
+function isBaseOct() {
+    return BASE == BASES.OCT
+}
+
+function isModeDegrees() {
+    return MODE == MODES.DEG
+}
+
+function isModeRadians() {
+    return MODE == MODES.RAD
+}
+
+function isPrecisionFix() {
+    return PRECISION == PREC.FIX
+}
+
+function isPrecisionSci() {
+    return PRECISION == PREC.SCI
+}
+
+function isPrecisionAll() {
+    return PRECISION == PREC.ALL
+}
+
+function isStored() {
+    return STORED_X != null
+}
+
+function _isPending() {
+    return PENDING != ''
+}
+
+function _isInt(str) {
+    const i = parseInt(str)
+    return ''+i == str
+}
+
+function _clearPending() {
+    PENDING = ''
+}
+
+function _clearStack() {
+    STACK = []
+}
+
+function _clearStored() {
+    STORED_X = null
+}
+
+function toFix(val, dispPrec) {
+    const num = (typeof val === 'number' ? val : Number(val))
+    return (num ? ''+num.toFixed(dispPrec) : '')
+}
+
+function toSci(val, dispPrec) {
+    const num = (typeof val === 'number' ? val : Number(val))
+    return (num ? ''+num.toExponential(dispPrec) : '')
+}
+
+
+// Javascript bitwise operators can only operate on (signed) 32-bit values.
+// Larger values will be truncated to fit in 32-bits.
+// The leftmost bit is used to store the sign. As a consequence,
+// bitwise operators can operate on values from -2^31 to 2^31-1.
+function toBinary(val) {
+     // NOT (2^32-1) returns '0', rather than many zeros. 
+     const isNeg = (val < 0)
+     var intPart = parseInt(val)
+     var str = ''
+     if (isNeg) {
+         let binstr = Math.abs(intPart+1).toString(2)
+         str = binstr.replace(/0/g, 'z').replace(/1/g, '0').replace(/z/g, '1')
+     } else {
+         str = intPart.toString(2)
+     }
+
+     // Binary values are displayed in multiples of eight characters. To avoid
+     // having to print 32 bits of a number, we print the shortest multiple of
+     // eight characters that can hold the value. e.g. A value of '2' is shown
+     // as 0b00000010 rather than 0b00000000_00000000_00000000_00000010.
+     const pfx = (isNeg ? '1' : '0')
+     while (str.length % 8) {
+         str = pfx + str
+     }
+     // Some operations result in a string of all zeros. E.g. 'NOT 255'
+     // (equivalent to 'NOT -256') will result in 0b00000000, which
+     // can be interpreted as 0b11111111_00000000 or 0b00000000_00000000.
+     // To disambiguate this, 0b11111111 will be prepended to negative values.
+     if (isNeg) {
+          str = '1'.repeat(8) + str
+     }
+
+     return '0b'+str.match(/.{8}/g).join('_')
+}
+
+function toAll(val) {
+    if (typeof val === 'undefined') {
+      return ''
+    }
+
+    var intPart = parseInt(val);
+    var isNeg = intPart < 0
+    var absVal = Math.abs(intPart)
+    if (isBaseBin()) {
+        return toBinary(val)
+    }
+    if (isBaseOct()) {
+        let octStr = '0o'+Math.abs(intPart).toString(8)
+        if (intPart < 0) {
+            octStr = '-'+octStr
+        }
+        return octStr
+    }
+    if (isBaseHex()) {
+        let hexStr = '0x'+Math.abs(intPart).toString(16).toUpperCase()
+        if (intPart < 0) {
+            hexStr = '-'+hexStr
+        }
+        return hexStr
+    }
+    return _pretty(''+val)
+}
+
+function _prettierTrim(str, ch) {
+    while (!str.endsWith(ch)) {
+        str = str.substring(0, str.length-1)
+    }
+    while (str.endsWith(ch)) {
+        str = str.substring(0, str.length-1)
+    }
+    return str
+}
+
+// Correct ugly values such as:
+// sqrt(8) * sqrt(8) = 8.000000000000002
+// sin(30) = 0.49999999999999994
+// asin(0.5) = 30.000000000000004
+// 0.1 + 0.2 = 0.30000000000000004
+// 0.0000025481 * 10000 = 0.025480999999999997
+function _pretty(str) {
+    const dotPos = str.indexOf('.')
+    if (dotPos >= 0) {
+        let s = str.substring(dotPos + 1)
+        // 9's must be rounded, 0's must be removed.
+        if (s.indexOf('9'.repeat(11)) >= 0) {
+            s = _prettierTrim(s, '9')
+            let add = Math.pow(10, -s.length)
+            if (s.length) {
+                s = '.'+s
+            }
+            const v = str.substring(0, dotPos) + s
+            return parseFloat(v) + add
+        } else if (s.indexOf('0'.repeat(11)) >= 0) {
+            let a = _prettierTrim(s, '0')
+            if (a.length) {
+                a = '.'+a
+            }
+            return str.substring(0, dotPos) + a
+        }
+    }
+    return str
+}
+
+function _fmt(val) {
+    if (isBaseDec()) {
+        if (isPrecisionFix()){
+            return toFix(val, DISP_PREC)
+        } else if (isPrecisionSci()) {
+            return toSci(val, DISP_PREC)
+        }
+    }
+    return toAll(val)
+}
+
+function _updateLcd() {
+
+    // These arrows are supported/visible in all browsers; other arrows may not be.
+    const upwardLeftArrow = '\u21b0'
+    const upwardRightArrow = '\u21b1'
+
+    const lsEle = document.getElementById('lsind')
+    lsEle.innerHTML = (isLeftShifted() ? upwardLeftArrow : '')
+
+    const rsEle = document.getElementById('rsind')
+    rsEle.innerHTML = (isRightShifted() ? upwardRightArrow : '')
+
+    const modeEle = document.getElementById('modeind')
+    modeEle.innerHTML = (isModeRadians() ? 'RAD' : 'DEG')
+
+    const precEle = document.getElementById('precind')
+    precEle.innerHTML = (isPrecisionFix() ? 'FIX' : (isPrecisionSci() ? 'SCI' : 'ALL')) 
+
+    // 'DEC' for decimal and 'DEG' for degrees are almost indistinguishable,
+    // so use numbers rather than three-letter abbreviations for base.
+    const baseEle = document.getElementById('baseind')
+    baseEle.innerHTML = (isBaseHex() ? '16' : isBaseDec() ? '10' : isBaseOct() ? ' 8' : ' 2')
+
+    // Truncate if too large to prevent altering positions of other indicators.
+    const ellipsis = '&hellip;'
+    const maxLen = 9
+    let storedStr = '' + STORED_X
+    if (storedStr.length > maxLen) {
+        storedStr = storedStr.substring(0, maxLen-1) + ellipsis
+    }
+
+    const stoEle = document.getElementById('stoind')
+    stoEle.innerHTML = (isStored() ? 'S='+storedStr : '')
+
+    const blinkOnChar = '\u25fb'
+    const blinkOffChar = '\u25fc'
+
+    let line3 = _fmt(STACK[3])
+    let line2 = _fmt(STACK[2])
+    let line1 = _fmt(STACK[1])
+    let line0 = _fmt(STACK[0])
+    if (PENDING) {
+        line3 = line2
+        line2 = line1
+        line1 = line0
+        line0 = PENDING + (BLINK_STATE ? blinkOnChar : blinkOffChar)
+    }
+    const el = document.getElementById('lcd')
+    el.value = ['', line3, line2, line1, line0].join('\n')
+}
+
+function _startBlinking() {
+    IS_BLINKING = true
+    setTimeout(_continueBlinking, 1)
+}
+
+function _continueBlinking() {
+    if (!_isBlinking()) {
+        return
+    }
+    BLINK_STATE = !BLINK_STATE
+    _updateLcd()
+    setTimeout(_continueBlinking, BLINK_DELAY_MS)
+}
+
+
+function _stopBlinking() {
+    IS_BLINKING = false
+}
+
+</script>
+
+<style type="text/css">
+body {
+  padding: 0;
+  margin: 0;
+}
+
+table.calculator {
+    background-image: linear-gradient(#565c5c, #2a292e);
+    width: 100vw;
+    height: 100vh;
+}
+td {
+    text-align: center;
+}
+#lcd {
+    color: black;
+    background-color: #d3e1c6; /* silver */
+    display: black;
+    font-family: monospace;
+    font-size: xx-large;
+    font-weight: bold;
+    text-align: right;
+    width: 95%;
+    vertical-align: middle;
+}
+#lsind {
+    color: black;
+    flex: 0.5;
+    font-weight: bolder;
+    font-size: large;
+}
+#rsind {
+    color: black;
+    flex: 0.5;
+    font-weight: bolder;
+    font-size: large;
+}
+#annunce {
+    display: flex;
+    height: 1px;
+    justify-content: space-around;
+    width: 95%;
+}
+#stoind {
+    text-align: left;
+}
+.hex {
+    display: none;
+}
+.ind {
+    flex: 1;
+    font-family: monospace;
+    font-size: small;
+    height: 1px;
+    position: relative;
+    top: 5px;
+    z-index: 20;
+}
+
+button#leftshiftbtn {
+   background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0NSA1MCI+CjxwYXRoIGlkPSJBcnJvd0xlZnQiIGZpbGw9IiMwMDAwMDAiIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMSIKZD0iTSAxLjIyLDIxLjkxCkMgMy45MCwxOS4yMyAxMS42NSwxMS40OCAxNC4wMCw5LjA0CjE3LjA5LDYuMDAgMjEuNjEsOS41MiAxOC42MSwxMy4xMwoxNC43OCwxNy4wNCAxNC42NCwxNy4zNCAxMy4wMCwxOS4wMAoxNy42NCwxOS4wMCAyOS44MywxOS4wMCAzNy4wOSwxOS4wNAo0MS44NywxOC45MSA0Mi4zNSwyMi4zNSA0Mi4xNywyNC4wNAo0Mi4wOSwyOC42NSA0Mi4xNywzNi40MCA0Mi4xNyw0MC45Ngo0Mi4xNyw0MC45NiAzNi4wMCw0MS4wMCAzNi4wMCw0MS4wMAozNi4wMCwzNy44OSAzNi4xMywzMi4zOSAzNi4wNCwyNy4wOQozNi4wOSwyNS4xMyAzNC45MSwyNS4wNCAzMy43NCwyNS4wNAoyOC4xMywyNS4wOSAxNy4xOSwyNS4wMCAxMy4wMCwyNS4wMAoxNC44OSwyNi45MCAxMy44MywyNi4wOSAxOC41MiwzMC44NwoyMi41MiwzNC4zMCAxNy42MSwzOC43NCAxNC4zMCwzNS4wNAoxMC4yNiwzMC44MyA2LjU3LDI3LjUyIDEuMjIsMjEuOTEgWiIgLz4KPC9zdmc+Cg==') no-repeat center, linear-gradient(#948ac7, #625573);
+}
+
+button#rightshiftbtn {
+   background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0NSA1MCI+CjxwYXRoIGlkPSJTZWxlY3Rpb24iIGZpbGw9IiMwMDAwMDAiIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMSIKZD0iTSA0My43OCwyMS45MQpDIDQxLjEwLDE5LjIzIDMzLjM1LDExLjQ4IDMxLjAwLDkuMDQKMjcuOTEsNi4wMCAyMy4zOSw5LjUyIDI2LjM5LDEzLjEzCjMwLjIyLDE3LjA0IDMwLjM2LDE3LjM0IDMyLjAwLDE5LjAwCjI3LjM2LDE5LjAwIDE1LjE3LDE5LjAwIDcuOTEsMTkuMDQKMy4xMywxOC45MSAyLjY1LDIyLjM1IDIuODMsMjQuMDQKMi45MSwyOC42NSAyLjgzLDM2LjQwIDIuODMsNDAuOTYKMi44Myw0MC45NiA5LjAwLDQxLjAwIDkuMDAsNDEuMDAKOS4wMCwzNy44OSA4Ljg3LDMyLjM5IDguOTYsMjcuMDkKOC45MSwyNS4xMyAxMC4wOSwyNS4wNCAxMS4yNiwyNS4wNAoxNi44NywyNS4wOSAyNy44MSwyNS4wMCAzMi4wMCwyNS4wMAozMC4xMSwyNi45MCAzMS4xNywyNi4wOSAyNi40OCwzMC44NwoyMi40OCwzNC4zMCAyNy4zOSwzOC43NCAzMC43MCwzNS4wNAozNC43NCwzMC44MyAzOC40MywyNy41MiA0My43OCwyMS45MSBaIiAvPgo8L3N2Zz4K') no-repeat center, linear-gradient(#6bc6b5, #317c65);
+}
+
+button {
+    background-image: linear-gradient(#242d34, #181914);
+    border-color: gray;
+    border-radius: 7px;
+    color: white;
+    display: block;
+    font-size: large;
+    height: 97%;
+    margin: auto auto;
+    position: relative;
+    width: 97%;
+}
+
+td {
+    width: 20%;
+}
+div.tdc.sz2 {
+    font-size: xx-large;
+}
+div.tdc.sz1 {
+    font-size: x-large;
+}
+div.tdc {
+    font-weight: bold;
+    font-size: large;
+}
+div.tdr {
+    color: #79e5d5; /* teal */
+    font-family: monospace;
+    font-size: small;
+    font-weight: bold;
+    position: absolute;
+    text-align: center;
+    top: 0;
+    right: 2px;
+}
+div.tdl {
+    color: #948ac7; /* lavendar */
+    font-family: monospace;
+    font-size: small;
+    font-weight: bold;
+    left: 2px;
+    position: absolute;
+    text-align: center;
+    top: 0;
+}
+</style>
+
+</head>
+<body onload="init()">
+
+      <div id="rpncal">
+        <table class="calculator">
+          <tbody>
+
+          <tr>
+            <td class="tdd" colspan="5">
+              <center>
+                <div id='annunce'>
+                  <div id='lsind' class="ind"></div>
+                  <div id='rsind' class="ind"></div>
+                  <div id='baseind' class="ind"></div>
+                  <div id='precind' class="ind"></div>
+                  <div id='modeind' class="ind"></div>
+                  <div id='stoind' class="ind"></div>
+                </div>
+                <textarea rows=5 id='lcd' spellcheck='false' wrap='off' readonly="readonly"></textarea>
+              </center>
+            </td>
+          </tr>
+
+           <tr>
+            <td class="tds"><button onclick="return btnSto()"><div class='tdl'>RCL</div><div class='tdr'>AND</div><div class='tdc'>STO</div></button></td>
+            <td class="tds"><button onclick="return btnDisp()"><div class='tdr'>NOT</div><div class='tdc'>DISP</div></button></td>
+            <td class="tds"><button onclick="return btnBase()"><div class='tdl'>MODE</div><div class='tdr'>OR</div><div class='tdc shrink'>BASE</btuton></td>
+            <td class="tds"><button onclick="return btnSqrt()"><div class='tdl'>x&radic;y</div><div class='tdr'>XOR</div><div class='tdc'>&radic;x</div></button></td>
+            <td class="tds"><button onclick="return btnSwap()"><div class='tdr'>UNDO</div><div class='tdc'>SWAP</div></button></td>
+          </tr>
+
+          <tr>
+            <td class="tds"><button onclick="return btnSin()"><div class='tdl'>ASIN</div><div class='tdc'>SIN</div></button></td>
+            <td class="tds"><button onclick="return btnCos()"><div class='tdl'>ACOS</div><div class='tdc'>COS</div></btuton></td>
+            <td class="tds"><button onclick="return btnTan()"><div class='tdl'>ATAN</div><div class='tdc'>TAN</div></btuton></td>
+            <td class="tds"><button onclick="return btnRecip()"><div class='tdl'>e<sup>x</sup></div><div class='tdr'>LN</div><div class='tdc'>1/x</div></button></td>
+            <td class="tds"><button onclick="return btnPowyx()"><div class='tdl'>10<sup>x</sup></div><div class='tdr'>LOG</div><div class='tdc'>y<sup>x</sup></div></button></td>
+           </tr>
+
+          <tr>
+            <td class="tds" colspan="2"><button onclick="return btnEnter()"><div class='tdc'>ENTER</div></button></td>
+            <td class="tds"><button onclick="return btnChangeSign()"><div class='tdl'>RAND</div><div class='tdr'>MOD</div><div class='tdc sz1'>+/-</div></button></td>
+            <td class="tds"><button onclick="return btnExpo()"><div class='tdl'>C(y,x)</div><div class='tdr'>x!</div><div class='tdc'>EEX</div></button></td>
+            <td class="tds"><button onclick="return btnDeleteChar()"><div class='tdr'>CLEAR</div><div class='tdc sz2'>&DoubleLeftArrow;</div></button></td>
+          </tr>
+
+          <tr>
+            <td class="tds">&nbsp;</td>
+            <td class="tds"><button onclick="return btn7()"><div class='tdc oct sz2'>7</div></button></td>
+            <td class="tds"><button onclick="return btn8()"><div class='tdc dec sz2'>8</div></button></td>
+            <td class="tds"><button onclick="return btn9()"><div class='tdc dec sz2'>9</div></button></td>
+            <td class="tds"><button onclick="return btnDivide()"><div class='tdc sz2'>&div;</div></button></td>
+          </tr>
+
+          <tr>
+  	        <td class="tds"><button id="leftshiftbtn" onclick="return btnLeftShift()">&nbsp;</button></td>
+            <td class="tds"><button onclick="return btn4()"><div class='tdr hex'>E</div><div class='tdc oct sz2'>4</div></button></td>
+            <td class="tds"><button onclick="return btn5()"><div class='tdr hex'>F</div><div class='tdc oct sz2'>5</div></button></td>
+            <td class="tds"><button onclick="return btn6()"><div class='tdc oct sz2'>6</div></button></td>
+            <td class="tds"><button onclick="return btnMultiply()"><div class='tdc sz2'>&times;</div></button></td>
+          </tr>
+
+          <tr>
+  	        <td class="tds"><button id="rightshiftbtn" onclick="return btnRightShift()">&nbsp;</button></td>
+            <td class="tds"><button onclick="return btn1()"><div class='tdr hex'>B</div><div class='tdc sz2'>1</div></button></td>
+            <td class="tds"><button onclick="return btn2()"><div class='tdr hex'>C</div><div class='tdc oct sz2'>2</div></button></td>
+            <td class="tds"><button onclick="return btn3()"><div class='tdr hex'>D</div><div class='tdc oct sz2'>3</div></button></td>
+            <td class="tds"><button onclick="return btnSubtract()"><div class='tdc sz2'>&minus;</div></button></td>
+          </tr>
+
+          <tr>
+            <td class="tds"><button onclick="return btnC()"><div class='tdc sz2'>C</div></button></td>
+            <td class="tds"><button onclick="return btn0()"><div class='tdr hex'>A</div><div class='tdc sz2'>0</div></button></td>
+            <td class="tds"><button onclick="return btnDot()"><div class='tdl dec dot'>&tau;</div><div class='tdr dec dot'>&pi;</div><div class='tdc dec sz2 dot'>.</div></button></td>
+  	        <td class="tds">&nbsp;</td>
+            <td class="tds"><button onclick="return btnAdd()"><div class='tdc sz2'>+</div></button></td>
+          </tr>
+
+         </tbody>
+       </table>
+
+      </div>
+
+</body>
+</html>
